@@ -416,10 +416,10 @@ class HyperDown
 
         // link
         $text = preg_replace_callback(
-            "/<(https?:\/\/.+)>/i",
+            "/<(https?:\/\/.+|(?:mailto:)?[_a-z0-9-\.\+]+@[_\w-]+\.[a-z]{2,})>/i",
             function ($matches) use ($self) {
                 $url = $self->cleanUrl($matches[1]);
-                $link = $self->call('parseLink', $matches[1]);
+                $link = $self->call('parseLink', $url);
 
                 return $self->makeHolder(
                     "<a href=\"{$url}\">{$link}</a>"
@@ -475,9 +475,11 @@ class HyperDown
             function ($matches) use ($self) {
                 $escaped = htmlspecialchars($self->escapeBracket($matches[1]));
                 $url = $self->escapeBracket($matches[2]);
-                $url = $self->cleanUrl($url);
+                list ($url, $title) = $self->cleanUrl($url, true);
+                $title = empty($title)? $escaped : " title=\"{$title}\"";
+
                 return $self->makeHolder(
-                    "<img src=\"{$url}\" alt=\"{$escaped}\" title=\"{$escaped}\">"
+                    "<img src=\"{$url}\" alt=\"{$title}\" title=\"{$title}\">"
                 );
             },
             $text
@@ -505,8 +507,10 @@ class HyperDown
                     $self->escapeBracket($matches[1]),  '',  false, false
                 );
                 $url = $self->escapeBracket($matches[2]);
-                $url = $self->cleanUrl($url);
-                return $self->makeHolder("<a href=\"{$url}\">{$escaped}</a>");
+                list ($url, $title) = $self->cleanUrl($url, true);
+                $title = empty($title) ? '' : " title=\"{$title}\"";
+
+                return $self->makeHolder("<a href=\"{$url}\"{$title}>{$escaped}</a>");
             },
             $text
         );
@@ -537,10 +541,11 @@ class HyperDown
         // autolink url
         if ($enableAutoLink) {
             $text = preg_replace_callback(
-                "/(^|[^\"])((https?):\S+)($|[^\"])/i",
+                "/(^|[^\"])(https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\b([-a-zA-Z0-9()@:%_\+.~#?&\/=]*)|(?:mailto:)?[_a-z0-9-\.\+]+@[_\w-]+\.[a-z]{2,})($|[^\"])/",
                 function ($matches) use ($self) {
+                    $url = $self->cleanUrl($matches[2]);
                     $link = $self->call('parseLink', $matches[2]);
-                    return "{$matches[1]}<a href=\"{$matches[2]}\">{$link}</a>{$matches[4]}";
+                    return "{$matches[1]}<a href=\"{$url}\">{$link}</a>{$matches[5]}";
                 },
                 $text
             );
@@ -711,18 +716,19 @@ class HyperDown
 
         if (preg_match("/^(\s*)((?:[0-9]+\.)|\-|\+|\*)\s+/i", $line, $matches)) {
             $space = strlen($matches[1]);
+            $tab = strlen($matches[0]) - $space;
             $state['empty'] = 0;
             $type = false !== strpos('+-*', $matches[2]) ? 'ul' : 'ol';
 
             // opened
             if ($this->isBlock('list')) {
                 if ($space < $block[3][0] || ($space == $block[3][0] && $type != $block[3][1])) {
-                    $this->startBlock('list', $key, [$space, $type]);
+                    $this->startBlock('list', $key, [$space, $type, $tab]);
                 } else {
                     $this->setBlock($key);
                 }
             } else {
-                $this->startBlock('list', $key, [$space, $type]);
+                $this->startBlock('list', $key, [$space, $type, $tab]);
             }
 
             return false;
@@ -738,13 +744,19 @@ class HyperDown
      * @param $state
      * @return bool
      */
-    private function parseBlockCode($block, $key, $line, $state)
+    private function parseBlockCode($block, $key, $line, &$state)
     {
         if (preg_match("/^(\s*)(~{3,}|`{3,})([^`~]*)$/i", $line, $matches)) {
             if ($this->isBlock('code')) {
+                if ($state['code'] != $matches[2]) {
+                    $this->setBlock($key);
+                    return false;
+                }
+
                 $isAfterList = $block[3][2];
 
                 if ($isAfterList) {
+                    $state['empty'] = 0;
                     $this->combineBlock()
                         ->setBlock($key);
                 } else {
@@ -759,6 +771,8 @@ class HyperDown
 
                     $isAfterList = strlen($matches[1]) >= $space + $state['empty'];
                 }
+
+                $state['code'] = $matches[2];
 
                 $this->startBlock('code', $key, array(
                     $matches[1],  $matches[3],  $isAfterList
@@ -1391,16 +1405,25 @@ class HyperDown
     private function parseList(array $lines, $value, $start)
     {
         $html = '';
-        list($space, $type) = $value;
+        list($space, $type, $tab) = $value;
         $rows = array();
+        $suffix = '';
         $last = 0;
 
-        foreach ($lines as $line) {
+        foreach ($lines as $key => $line) {
             if (preg_match("/^(\s{" . $space . "})((?:[0-9]+\.?)|\-|\+|\*)(\s+)(.*)$/i", $line, $matches)) {
+                if ($type == 'ol' && $key == 0) {
+                    $start = intval($matches[2]);
+
+                    if ($start != 1) {
+                        $suffix = ' start="' . $start . '"';
+                    }
+                }
+
                 $rows[] = [$matches[4]];
                 $last = count($rows) - 1;
             } else {
-                $rows[$last][] = preg_replace("/^\s{" . $space . "}/", '', $line);
+                $rows[$last][] = preg_replace("/^\s{" . ($tab + $space) . "}/", '', $line);
             }
         }
 
@@ -1409,7 +1432,7 @@ class HyperDown
             $start += count($row);
         }
 
-        return "<{$type}>{$html}</{$type}>";
+        return "<{$type}{$suffix}>{$html}</{$type}>";
     }
 
     /**
@@ -1606,17 +1629,37 @@ class HyperDown
 
     /**
      * @param $url
-     * @return string
+     * @param bool $parseTitle
+     *
+     * @return mixed
      */
-    public function cleanUrl($url)
+    public function cleanUrl($url, $parseTitle = false)
     {
-        if (preg_match("/^\s*((http|https|ftp|mailto):\S+)/i", $url, $matches)) {
-            return $matches[1];
-        } elseif (preg_match("/^\s*(\S+)/i", $url, $matches)) {
-            return $matches[1];
-        } else {
+        $title = null;
+        $url = trim($url);
+
+        if ($parseTitle) {
+            $pos = strpos($url, ' ');
+
+            if ($pos !== false) {
+                $title = htmlspecialchars(trim(substr($url, $pos + 1), ' "\''));
+                $url = substr($url, 0, $pos);
+            }
+        }
+
+        $url = preg_replace("/[\"'<>\s]/", '', $url);
+
+        if (preg_match("/^(mailto:)?[_a-z0-9-\.\+]+@[_\w-]+\.[a-z]{2,}$/i", $url, $matches)) {
+            if (empty($matches[1])) {
+                $url = 'mailto:' . $url;
+            }
+        }
+
+        if (preg_match("/^\w+:/i", $url) && !preg_match("/^(https?|mailto):/i", $url)) {
             return '#';
         }
+
+        return $parseTitle ? [$url, $title] : $url;
     }
 
     /**

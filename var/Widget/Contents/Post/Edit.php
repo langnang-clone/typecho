@@ -130,8 +130,9 @@ class Widget_Contents_Post_Edit extends Widget_Abstract_Contents implements Widg
             $created = $this->request->created;
         } else if (!empty($this->request->date)) {
             $dstOffset = !empty($this->request->dst) ? $this->request->dst : 0;
-            $timezoneOffset = $this->options->timezone;
-            $timezone = ($timezoneOffset >= 0 ? '+' : '-') . str_pad($timezoneOffset / 3600, 2, '0', STR_PAD_LEFT) . ':00';
+            $timezoneSymbol = $this->options->timezone >= 0 ? '+' : '-';
+            $timezoneOffset = abs($this->options->timezone);
+            $timezone = $timezoneSymbol . str_pad($timezoneOffset / 3600, 2, '0', STR_PAD_LEFT) . ':00';
             list ($date, $time) = explode(' ', $this->request->date);
 
             $created = strtotime("{$date}T{$time}{$timezone}") - $dstOffset;
@@ -873,7 +874,7 @@ class Widget_Contents_Post_Edit extends Widget_Abstract_Contents implements Widg
 
         /** 设置提示信息 */
         $this->widget('Widget_Notice')->set($markCount > 0 ? _t('文章已经被标记为<strong>%s</strong>', $statusList[$status]) : _t('没有文章被标记'),
-        $deleteCount > 0 ? 'success' : 'notice');
+        $markCount > 0 ? 'success' : 'notice');
 
         /** 返回原网页 */
         $this->response->goBack();

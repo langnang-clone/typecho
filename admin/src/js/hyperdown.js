@@ -323,12 +323,12 @@
           return _this.makeHolder(prefix + escaped);
         };
       })(this));
-      text = text.replace(/<(https?:\/\/.+)>/ig, (function(_this) {
+      text = text.replace(/<(https?:\/\/.+|(?:mailto:)?[_a-z0-9-\.\+]+@[_\w-]+\.[a-z]{2,})>/ig, (function(_this) {
         return function() {
           var link, matches, url;
           matches = 1 <= arguments.length ? slice.call(arguments, 0) : [];
           url = _this.cleanUrl(matches[1]);
-          link = _this.call('parseLink', matches[1]);
+          link = _this.call('parseLink', url);
           return _this.makeHolder("<a href=\"" + url + "\">" + link + "</a>");
         };
       })(this));
@@ -367,12 +367,13 @@
       })(this));
       text = text.replace(/!\[((?:[^\]]|\\\]|\\\[)*?)\]\(((?:[^\)]|\\\)|\\\()+?)\)/g, (function(_this) {
         return function() {
-          var escaped, matches, url;
+          var escaped, matches, ref, title, url;
           matches = 1 <= arguments.length ? slice.call(arguments, 0) : [];
           escaped = htmlspecialchars(_this.escapeBracket(matches[1]));
           url = _this.escapeBracket(matches[2]);
-          url = _this.cleanUrl(url);
-          return _this.makeHolder("<img src=\"" + url + "\" alt=\"" + escaped + "\" title=\"" + escaped + "\">");
+          ref = _this.cleanUrl(url, true), url = ref[0], title = ref[1];
+          title = title == null ? escaped : " title=\"" + title + "\"";
+          return _this.makeHolder("<img src=\"" + url + "\" alt=\"" + title + "\" title=\"" + title + "\">");
         };
       })(this));
       text = text.replace(/!\[((?:[^\]]|\\\]|\\\[)*?)\]\[((?:[^\]]|\\\]|\\\[)+?)\]/g, (function(_this) {
@@ -386,12 +387,13 @@
       })(this));
       text = text.replace(/\[((?:[^\]]|\\\]|\\\[)+?)\]\(((?:[^\)]|\\\)|\\\()+?)\)/g, (function(_this) {
         return function() {
-          var escaped, matches, url;
+          var escaped, matches, ref, title, url;
           matches = 1 <= arguments.length ? slice.call(arguments, 0) : [];
           escaped = _this.parseInline(_this.escapeBracket(matches[1]), '', false, false);
           url = _this.escapeBracket(matches[2]);
-          url = _this.cleanUrl(url);
-          return _this.makeHolder("<a href=\"" + url + "\">" + escaped + "</a>");
+          ref = _this.cleanUrl(url, true), url = ref[0], title = ref[1];
+          title = title == null ? '' : " title=\"" + title + "\"";
+          return _this.makeHolder("<a href=\"" + url + "\"" + title + ">" + escaped + "</a>");
         };
       })(this));
       text = text.replace(/\[((?:[^\]]|\\\]|\\\[)+?)\]\[((?:[^\]]|\\\]|\\\[)+?)\]/g, (function(_this) {
@@ -404,14 +406,14 @@
         };
       })(this));
       text = this.parseInlineCallback(text);
-      text = text.replace(/<([_a-z0-9-\.\+]+@[^@]+\.[a-z]{2,})>/ig, '<a href="mailto:$1">$1</a>');
       if (enableAutoLink) {
-        text = text.replace(/(^|[^\"])((https?):\S+)($|[^\"])/ig, (function(_this) {
+        text = text.replace(/(^|[^\"])(https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\b([-a-zA-Z0-9()@:%_\+.~#?&\/=]*)|(?:mailto:)?[_a-z0-9-\.\+]+@[_\w-]+\.[a-z]{2,})($|[^\"])/g, (function(_this) {
           return function() {
-            var link, matches;
+            var link, matches, url;
             matches = 1 <= arguments.length ? slice.call(arguments, 0) : [];
+            url = _this.cleanUrl(matches[2]);
             link = _this.call('parseLink', matches[2]);
-            return matches[1] + "<a href=\"" + matches[2] + "\">" + link + "</a>" + matches[4];
+            return matches[1] + "<a href=\"" + url + "\">" + link + "</a>" + matches[5];
           };
         })(this));
       }
@@ -516,7 +518,7 @@
     };
 
     Parser.prototype.parseBlockList = function(block, key, line, state) {
-      var matches, space, type;
+      var matches, space, tab, type;
       if ((this.isBlock('list')) && !line.match(/^\s*\[((?:[^\]]|\\\]|\\\[)+?)\]:\s*(.+)$/)) {
         if (!!(line.match(/^(\s*)(~{3,}|`{3,})([^`~]*)$/i))) {
           return true;
@@ -532,16 +534,17 @@
       }
       if (!!(matches = line.match(/^(\s*)((?:[0-9]+\.)|\-|\+|\*)\s+/i))) {
         space = matches[1].length;
+        tab = matches[0].length - space;
         state.empty = 0;
         type = 0 <= '+-*'.indexOf(matches[2]) ? 'ul' : 'ol';
         if (this.isBlock('list')) {
           if (space < block[3][0] || (space === block[3][0] && type !== block[3][1])) {
-            this.startBlock('list', key, [space, type]);
+            this.startBlock('list', key, [space, type, tab]);
           } else {
             this.setBlock(key);
           }
         } else {
-          this.startBlock('list', key, [space, type]);
+          this.startBlock('list', key, [space, type, tab]);
         }
         return false;
       }
@@ -552,8 +555,13 @@
       var isAfterList, matches, space;
       if (!!(matches = line.match(/^(\s*)(~{3,}|`{3,})([^`~]*)$/i))) {
         if (this.isBlock('code')) {
+          if (state.code !== matches[2]) {
+            this.setBlock(key);
+            return false;
+          }
           isAfterList = block[3][2];
           if (isAfterList) {
+            state.empty = 0;
             this.combineBlock().setBlock(key);
           } else {
             (this.setBlock(key)).endBlock();
@@ -564,6 +572,7 @@
             space = block[3][0];
             isAfterList = matches[1].length >= space + state.empty;
           }
+          state.code = matches[2];
           this.startBlock('code', key, [matches[1], matches[3], isAfterList]);
         }
         return false;
@@ -888,7 +897,7 @@
       }
       isEmpty = true;
       lines = lines.slice(1, -1).map(function(line) {
-        line = line.replace(new RegExp("/^[ ]{" + count + "}/"), '');
+        line = line.replace(new RegExp("^[ ]{" + count + "}"), '');
         if (isEmpty && !line.match(/^\s*$/)) {
           isEmpty = false;
         }
@@ -955,18 +964,25 @@
     };
 
     Parser.prototype.parseList = function(lines, value, start) {
-      var html, j, l, last, len, len1, line, matches, row, rows, space, type;
+      var html, j, key, l, last, len, len1, line, matches, row, rows, space, suffix, tab, type;
       html = '';
-      space = value[0], type = value[1];
+      space = value[0], type = value[1], tab = value[2];
       rows = [];
+      suffix = '';
       last = 0;
-      for (j = 0, len = lines.length; j < len; j++) {
-        line = lines[j];
+      for (key = j = 0, len = lines.length; j < len; key = ++j) {
+        line = lines[key];
         if (matches = line.match(new RegExp("^(\\s{" + space + "})((?:[0-9]+\\.?)|\\-|\\+|\\*)(\\s+)(.*)$"))) {
+          if (type === 'ol' && key === 0) {
+            start = parseInt(matches[2]);
+            if (start !== 1) {
+              suffix = ' start="' + start + '"';
+            }
+          }
           rows.push([matches[4]]);
           last = rows.length - 1;
         } else {
-          rows[last].push(line.replace(new RegExp("^\\s{" + space + "}"), ''));
+          rows[last].push(line.replace(new RegExp("^\\s{" + (tab + space) + "}"), ''));
         }
       }
       for (l = 0, len1 = rows.length; l < len1; l++) {
@@ -974,7 +990,7 @@
         html += '<li>' + (this.parse(row.join("\n"), true, start)) + '</li>';
         start += row.length;
       }
-      return "<" + type + ">" + html + "</" + type + ">";
+      return "<" + type + suffix + ">" + html + "</" + type + ">";
     };
 
     Parser.prototype.parseTable = function(lines, value, start) {
@@ -1124,14 +1140,33 @@
       return (this.markLines(lines, start)).join("\n");
     };
 
-    Parser.prototype.cleanUrl = function(url) {
-      var matches;
-      if (!!(matches = url.match(/^\s*((http|https|ftp|mailto):\S+)/i))) {
-        return matches[1];
-      } else if (!!(matches = url.match(/^\s*(\S+)/))) {
-        return matches[1];
-      } else {
+    Parser.prototype.cleanUrl = function(url, parseTitle) {
+      var matches, pos, title;
+      if (parseTitle == null) {
+        parseTitle = false;
+      }
+      title = null;
+      url = trim(url);
+      if (parseTitle) {
+        pos = url.indexOf(' ');
+        if (pos >= 0) {
+          title = htmlspecialchars(trim(url.substring(pos + 1), ' "\''));
+          url = url.substring(0, pos);
+        }
+      }
+      url = url.replace(/["'<>\s]/g, '');
+      if (!!(matches = url.match(/^(mailto:)?[_a-z0-9-\.\+]+@[_\w-]+\.[a-z]{2,}$/i))) {
+        if (matches[1] == null) {
+          url = 'mailto:' + url;
+        }
+      }
+      if ((url.match(/^\w+:/i)) && !(url.match(/^(https?|mailto):/i))) {
         return '#';
+      }
+      if (parseTitle) {
+        return [url, title];
+      } else {
+        return url;
       }
     };
 
