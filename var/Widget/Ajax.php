@@ -41,13 +41,13 @@ class Ajax extends BaseOptions implements ActionInterface
     {
         $this->user->pass('editor');
         $client = Client::get();
+        $result = ['available' => 0];
         if ($client) {
             $client->setHeader('User-Agent', $this->options->generator)
                 ->setTimeout(10);
-            $result = ['available' => 0];
 
             try {
-                $client->send('http://typecho.org/version.json');
+                $client->send('https://typecho.org/version.json');
 
                 /** 匹配内容体 */
                 $response = $client->getResponseBody();
@@ -58,25 +58,23 @@ class Ajax extends BaseOptions implements ActionInterface
 
                     if (
                         isset($json['release'])
-                        && preg_match("/^[0-9\.]+$/", $json['release'])
+                        && preg_match("/^[0-9.]+$/", $json['release'])
                         && version_compare($json['release'], $version, '>')
                     ) {
                         $result = [
                             'available' => 1,
                             'latest'    => $json['release'],
                             'current'   => $version,
-                            'link'      => 'http://typecho.org/download'
+                            'link'      => 'https://typecho.org/download'
                         ];
                     }
                 }
             } catch (\Exception $e) {
                 // do nothing
             }
-
-            $this->response->throwJson($result);
         }
 
-        throw new Exception(_t('禁止访问'), 403);
+        $this->response->throwJson($result);
     }
 
     /**
@@ -89,20 +87,19 @@ class Ajax extends BaseOptions implements ActionInterface
     {
         $this->user->pass('subscriber');
         $client = Client::get();
+        $data = [];
         if ($client) {
             $client->setHeader('User-Agent', $this->options->generator)
                 ->setTimeout(10)
-                ->send('http://typecho.org/feed/');
+                ->send('https://typecho.org/feed/');
 
             /** 匹配内容体 */
             $response = $client->getResponseBody();
             preg_match_all(
-                "/<item>\s*<title>([^>]*)<\/title>\s*<link>([^>]*)<\/link>\s*<guid>[^>]*<\/guid>\s*<pubDate>([^>]*)<\/pubDate>/is",
+                "/<item>\s*<title>([^>]*)<\/title>\s*<link>([^>]*)<\/link>\s*<guid>[^>]*<\/guid>\s*<pubDate>([^>]*)<\/pubDate>/i",
                 $response,
                 $matches
             );
-
-            $data = [];
 
             if ($matches) {
                 foreach ($matches[0] as $key => $val) {
@@ -117,11 +114,9 @@ class Ajax extends BaseOptions implements ActionInterface
                     }
                 }
             }
-
-            $this->response->throwJson($data);
         }
 
-        throw new Exception(_t('禁止访问'), 403);
+        $this->response->throwJson($data);
     }
 
     /**
@@ -132,18 +127,20 @@ class Ajax extends BaseOptions implements ActionInterface
     public function editorResize()
     {
         $this->user->pass('contributor');
+        $size = $this->request->filter('int')->get('size');
+
         if (
             $this->db->fetchObject($this->db->select(['COUNT(*)' => 'num'])
                 ->from('table.options')->where('name = ? AND user = ?', 'editorSize', $this->user->uid))->num > 0
         ) {
             parent::update(
-                ['value' => $this->request->size],
+                ['value' => $size],
                 $this->db->sql()->where('name = ? AND user = ?', 'editorSize', $this->user->uid)
             );
         } else {
             parent::insert([
                 'name'  => 'editorSize',
-                'value' => $this->request->size,
+                'value' => $size,
                 'user'  => $this->user->uid
             ]);
         }

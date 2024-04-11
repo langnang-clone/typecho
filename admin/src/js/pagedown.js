@@ -1700,8 +1700,8 @@ else
 
     // The default text that appears in the dialog input box when entering
     // links.
-    var imageDefaultText = "http://";
-    var linkDefaultText = "http://";
+    var imageDefaultText = "https://";
+    var linkDefaultText = "https://";
 
     // -------------------------------------------------------------------
     //  END OF YOUR CHANGES
@@ -1766,6 +1766,8 @@ else
         hooks.addNoop("enterFullScreen");
         hooks.addNoop("enterFakeFullScreen");
         hooks.addNoop("exitFullScreen");
+
+        hooks.addNoop("save");
 
         this.getConverter = function () { return markdownConverter; }
 
@@ -3082,10 +3084,12 @@ else
                             doClick(buttons.undo);
                         }
                         break;
+                    case "s":
+                        hooks.save();
+                        break;
                     default:
                         return;
                 }
-
 
                 if (key.preventDefault) {
                     key.preventDefault();
